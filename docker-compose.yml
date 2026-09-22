@@ -1,0 +1,74 @@
+# Tensor-network contraction planner.
+#
+# Host ports are configurable via environment (see .env.example):
+#   API_HOST_PORT  - FastAPI published on the host        (default 8000)
+#   WEB_HOST_PORT  - web UI published on the host         (default 8080)
+#   API_LISTEN_PORT / WEB_LISTEN_PORT - ports inside the containers
+services:
+  api:
+    build:
+      context: ./backend
+    image: tn-planner-api
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: ${API_LISTEN_PORT:-8000}
+    ports:
+      - "${API_HOST_PORT:-8000}:${API_LISTEN_PORT:-8000}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json,os,urllib.request; p=os.environ.get('API_PORT','8000'); r=urllib.request.urlopen(f'http://127.0.0.1:{p}/health',timeout=2); assert json.load(r)['status']=='ok'",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        API_HOST: api
+        API_PORT: ${API_LISTEN_PORT:-8000}
+    image: tn-planner-web
+    environment:
+      WEB_PORT: ${WEB_LISTEN_PORT:-80}
+      API_HOST: api
+      API_PORT: ${API_LISTEN_PORT:-8000}
+    ports:
+      - "${WEB_HOST_PORT:-8080}:${WEB_LISTEN_PORT:-80}"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "sh",
+          "-c",
+          "wget -qO- http://127.0.0.1:$$WEB_PORT/health | grep -q '\"ok\"'",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 4s
+    restart: unless-stopped
+
+  # One-shot: backend tests, frontend production build, live API smoke.
+  # Exits 0 on success; Compose reports the exit code.
+  verify:
+    build:
+      context: .
+      dockerfile: verify/Dockerfile
+    image: tn-planner-verify
+    environment:
+      SMOKE_API_URL: http://api:${API_LISTEN_PORT:-8000}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: "no"
+    profiles: ["verify"]

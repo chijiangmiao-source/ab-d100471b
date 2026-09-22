@@ -1,0 +1,26 @@
+server {
+    listen       ${WEB_PORT};
+    server_name  _;
+
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # Web-level health check: serves static content without touching the API.
+    location = /health {
+        access_log off;
+        add_header Content-Type application/json;
+        return 200 '{"status":"ok","service":"web"}';
+    }
+
+    # Proxy API calls to the FastAPI service.
+    location /api/ {
+        proxy_pass http://${API_HOST}:${API_PORT};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
